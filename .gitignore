@@ -20,7 +20,11 @@ hhpc
 *.app
 
 # Ctags files
+tags*
 .tags*
 
 # log files
 *.log
+
+# vim files
+.*swp*

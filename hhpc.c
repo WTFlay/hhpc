@@ -1,5 +1,6 @@
 /**
- * Copyright (c) 2013 Nicolas Hillegeer <nicolas at hillegeer dot com>
+ * Copyright (c) 2013 Nicolas Hillegeer <nicolas at hillegeer dot com>,
+ * Flavien Schriever <flavien@schriever.dev>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -24,6 +25,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+#define _DEFAULT_SOURCE
 
 #include <X11/X.h>
 #include <X11/Xlib.h>
@@ -38,9 +40,15 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <syslog.h>
+
+#include <unistd.h>
+
+static const char *progname = "hhpc";
 
 static int gIdleTimeout = 1;
 static int gVerbose     = 0;
+static int gDaemon      = 0;
 
 static volatile sig_atomic_t working;
 
@@ -59,22 +67,22 @@ static int setupSignals() {
     sigemptyset(&act.sa_mask);
 
     if (sigaction(SIGTERM, &act, NULL) == -1) {
-        perror("hhpc: could not register SIGTERM");
+        syslog(LOG_ERR, "hhpc: could not register SIGTERM");
         return 0;
     }
 
     if (sigaction(SIGHUP, &act, NULL) == -1) {
-        perror("hhpc: could not register SIGHUP");
+        syslog(LOG_ERR, "hhpc: could not register SIGHUP");
         return 0;
     }
 
     if (sigaction(SIGINT, &act, NULL) == -1) {
-        perror("hhpc: could not register SIGINT");
+        syslog(LOG_ERR, "hhpc: could not register SIGINT");
         return 0;
     }
 
     if (sigaction(SIGQUIT, &act, NULL) == -1) {
-        perror("hhpc: could not register SIGQUIT");
+        syslog(LOG_ERR, "hhpc: could not register SIGQUIT");
         return 0;
     }
 
@@ -127,29 +135,29 @@ static int grabPointer(Display *dpy, Window win, Cursor cursor, unsigned int mas
 
         switch (rc) {
             case GrabSuccess:
-                if (gVerbose) fprintf(stderr, "hhpc: succesfully grabbed mouse pointer\n");
+                if (gVerbose) syslog(LOG_INFO, "hhpc: succesfully grabbed mouse pointer\n");
                 return 1;
 
             case AlreadyGrabbed:
-                if (gVerbose) fprintf(stderr, "hhpc: XGrabPointer: already grabbed mouse pointer, retrying with delay\n");
+                if (gVerbose) syslog(LOG_INFO, "hhpc: XGrabPointer: already grabbed mouse pointer, retrying with delay\n");
                 delay(0, 500);
                 break;
 
             case GrabFrozen:
-                if (gVerbose) fprintf(stderr, "hhpc: XGrabPointer: grab was frozen, retrying after delay\n");
+                if (gVerbose) syslog(LOG_INFO, "hhpc: XGrabPointer: grab was frozen, retrying after delay\n");
                 delay(0, 500);
                 break;
 
             case GrabNotViewable:
-                fprintf(stderr, "hhpc: XGrabPointer: grab was not viewable, exiting\n");
+                syslog(LOG_ERR, "hhpc: XGrabPointer: grab was not viewable, exiting\n");
                 return 0;
 
             case GrabInvalidTime:
-                fprintf(stderr, "hhpc: XGrabPointer: invalid time, exiting\n");
+                syslog(LOG_ERR, "hhpc: XGrabPointer: invalid time, exiting\n");
                 return 0;
 
             default:
-                fprintf(stderr, "hhpc: XGrabPointer: could not grab mouse pointer (%d), exiting\n", rc);
+                 syslog(LOG_ERR, "hhpc: XGrabPointer: could not grab mouse pointer (%d), exiting\n", rc);
                 return 0;
         }
     }
@@ -171,7 +179,7 @@ static void waitForMotion(Display *dpy, Window win, int timeout) {
     working = 1;
 
     if (!setupSignals()) {
-        fprintf(stderr, "hhpc: could not register signals, program will not exit cleanly\n");
+         syslog(LOG_WARNING, "hhpc: could not register signals, program will not exit cleanly\n");
     }
 
     while (working && grabPointer(dpy, win, emptyCursor, mask)) {
@@ -196,7 +204,7 @@ static void waitForMotion(Display *dpy, Window win, int timeout) {
         ready = select(xfd + 1, &fds, NULL, NULL, NULL);
 
         if (ready > 0) {
-            if (gVerbose) fprintf(stderr, "hhpc: event received, ungrabbing and sleeping\n");
+            if (gVerbose) syslog(LOG_INFO, "hhpc: event received, ungrabbing and sleeping\n");
 
             /* event received, replay event, release mouse, drain, sleep, regrab */
             XAllowEvents(dpy, ReplayPointer, CurrentTime);
@@ -206,13 +214,13 @@ static void waitForMotion(Display *dpy, Window win, int timeout) {
             while (XPending(dpy)) {
                 XMaskEvent(dpy, mask, &event);
 
-                if (gVerbose) fprintf(stderr, "hhpc: draining event\n");
+                if (gVerbose) syslog(LOG_INFO, "hhpc: draining event\n");
             }
 
             delay(timeout, 0);
         }
         else if (ready == 0) {
-            if (gVerbose) fprintf(stderr, "hhpc: timeout\n");
+            if (gVerbose) syslog(LOG_INFO, "hhpc: timeout\n");
         }
         else {
             if (working) perror("hhpc: error while select()'ing");
@@ -226,10 +234,11 @@ static void waitForMotion(Display *dpy, Window win, int timeout) {
 static int parseOptions(int argc, char *argv[]) {
     int option = 0;
 
-    while ((option = getopt(argc, argv, "i:v")) != -1) {
+    while ((option = getopt(argc, argv, "i:vd")) != -1) {
         switch (option) {
             case 'i': gIdleTimeout = atoi(optarg); break;
             case 'v': gVerbose = 1; break;
+            case 'd': gDaemon = 1; break;
             default: return 0;
         }
     }
@@ -238,26 +247,32 @@ static int parseOptions(int argc, char *argv[]) {
 }
 
 static void usage() {
-    printf("hhpc [-i] seconds [-v]\n");
+    printf("hhpc [-vd] [-i seconds]\n");
 }
 
 int main(int argc, char *argv[]) {
     if (!parseOptions(argc, argv)) {
         usage();
-
         return 1;
     }
 
     char *displayName = getenv("DISPLAY");
 
+    openlog(progname, LOG_PID, LOG_DAEMON);
+
+    if (gDaemon && daemon(0, 0) < 0) {
+         syslog(LOG_ERR, "hhpc: could not as daemon");
+        return 1;
+    }
+
     Display *dpy = XOpenDisplay(NULL);
     if (!dpy) {
         if (!displayName || strlen(displayName) == 0) {
-            fprintf(stderr, "hhpc: could not open display, DISPLAY environment variable not set, are you sure the X server is started?\n");
+             syslog(LOG_ERR, "hhpc: could not open display, DISPLAY environment variable not set, are you sure the X server is started?\n");
             return 2;
         }
         else {
-            fprintf(stderr, "hhpc: could not open display %s, check if your X server is running and/or the DISPLAY environment value is correct\n", displayName);
+             syslog(LOG_ERR, "hhpc: could not open display %s, check if your X server is running and/or the DISPLAY environment value is correct\n", displayName);
             return 1;
         }
     }
@@ -265,7 +280,7 @@ int main(int argc, char *argv[]) {
     int scr        = DefaultScreen(dpy);
     Window rootwin = RootWindow(dpy, scr);
 
-    if (gVerbose) fprintf(stderr, "hhpc: got root window, screen = %d, display = %p, rootwin = %d\n", scr, (void *) dpy, (int) rootwin);
+    if (gVerbose) syslog(LOG_INFO, "hhpc: got root window, screen = %d, display = %p, rootwin = %d\n", scr, (void *) dpy, (int) rootwin);
 
     waitForMotion(dpy, rootwin, gIdleTimeout);
 

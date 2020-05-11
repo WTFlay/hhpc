@@ -96,7 +96,7 @@ Changelog
 License (3-clause BSD)
 ----------------------
 
-Copyright (c) 2013 Nicolas Hillegeer <nicolas at hillegeer dot com>
+Copyright (c) 2013 Nicolas Hillegeer <nicolas at hillegeer dot com>, Flavien Schriever <flavien@schriever.dev>
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
