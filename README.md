@@ -84,6 +84,10 @@ Todo
 Changelog
 ---------
 
+### v0.4
+- Add option -d for run program as daemon (in background).
+- Use syslog library instead stdio library.
+
 ### v0.3
 
 - Use sync grabbing and make the X11 server replay the drained pointer
